@@ -55,7 +55,7 @@ func countBits(bytes []byte) (int, int) {
 	zeros := 0
 
 	for _, b := range bytes {
-		for i := 0; i < 8; i++ {
+		for i := range 8 {
 			if (b & (1 << i)) != 0 {
 				ones++
 			} else {
