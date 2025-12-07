@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -64,49 +62,6 @@ var (
 			BorderForeground(current).
 			Foreground(subtle)
 
-	// Diamond border for current result
-	diamondOneStyle = cardStyle.Copy().
-			Border(lipgloss.Border{
-			Top:         "◆",
-			Bottom:      "◆",
-			Left:        "◆",
-			Right:       "◆",
-			TopLeft:     "◆",
-			TopRight:    "◆",
-			BottomLeft:  "◆",
-			BottomRight: "◆",
-		}).
-		BorderForeground(current).
-		Foreground(special)
-
-	diamondZeroStyle = cardStyle.Copy().
-				Border(lipgloss.Border{
-			Top:         "◆",
-			Bottom:      "◆",
-			Left:        "◆",
-			Right:       "◆",
-			TopLeft:     "◆",
-			TopRight:    "◆",
-			BottomLeft:  "◆",
-			BottomRight: "◆",
-		}).
-		BorderForeground(current).
-		Foreground(highlight)
-
-	diamondTieStyle = cardStyle.Copy().
-			Border(lipgloss.Border{
-			Top:         "◆",
-			Bottom:      "◆",
-			Left:        "◆",
-			Right:       "◆",
-			TopLeft:     "◆",
-			TopRight:    "◆",
-			BottomLeft:  "◆",
-			BottomRight: "◆",
-		}).
-		BorderForeground(current).
-		Foreground(subtle)
-
 	// Text Styles
 	titleStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFDF5")).
@@ -149,8 +104,8 @@ type model struct {
 	results []flipResult
 	loading bool
 	err     error
-	width   int // Fixed: was 'wid'
-	height  int // Fixed: was 'heigh'
+	width   int
+	height  int
 }
 
 type flipMsg struct {
@@ -474,26 +429,4 @@ func fetchAnuQrngBytes() ([]byte, error) {
 	}
 
 	return anuResp.Data, nil
-}
-
-// These are kept for potential future use or fallback
-func fetchCryptoRandomBytes() ([]byte, error) {
-	bytes := make([]byte, bytesToFetch)
-	if _, err := rand.Read(bytes); err != nil {
-		return nil, fmt.Errorf("crypto random failed: %w", err)
-	}
-	return bytes, nil
-}
-
-func saveToFile(bytes []byte, filename string) error {
-	hexString := hex.EncodeToString(bytes)
-	return os.WriteFile(filename, []byte(hexString), 0644)
-}
-
-func loadFromFile(filename string) ([]byte, error) {
-	hexString, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, err
-	}
-	return hex.DecodeString(string(hexString))
 }
