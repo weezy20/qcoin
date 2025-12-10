@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
 	"strings"
@@ -94,25 +95,58 @@ const (
 	resTie
 )
 
+type appState int
+
+const (
+	stateNormal appState = iota
+	stateTemplateSelect
+	stateInput
+)
+
+type messagePair struct {
+	ones  string
+	zeros string
+}
+
+var messageTemplates = []messagePair{
+	{"yes", "no"},
+	{"no", "yes"},
+	{"true", "false"},
+	{"false", "true"},
+	{"heads", "tails"},
+	{"tails", "heads"},
+}
+
 type flipResult struct {
 	ones   int
 	zeros  int
 	winner resultType
 }
 
+type completedFlip struct {
+	ones     int
+	zeros    int
+	winner   resultType
+	onesMsg  string
+	zerosMsg string
+}
+
 type model struct {
-	source       string
-	results      []flipResult
-	loading      bool
-	err          error
-	width        int
-	height       int
-	onesMsg      string
-	zerosMsg     string
-	inputMode    bool
-	onesInput    textinput.Model
-	zerosInput   textinput.Model
-	focusedInput int // 0 for ones, 1 for zeros
+	source                 string
+	results                []completedFlip
+	loading                bool
+	err                    error
+	width                  int
+	height                 int
+	onesMsg                string
+	zerosMsg               string
+	state                  appState
+	templateSelectionIndex int
+	templateMenuItems      []messagePair
+	onesInput              textinput.Model
+	zerosInput             textinput.Model
+	focusedInput           int
+	randomizeMessages      bool
 }
 
 type flipMsg struct {
@@ -132,14 +166,18 @@ func initialModel(source string) model {
 	zerosInput.CharLimit = 20
 
 	return model{
-		source:       source,
-		results:      []flipResult{},
-		loading:      false,
-		onesMsg:      "ONES",
-		zerosMsg:     "ZEROS",
-		onesInput:    onesInput,
-		zerosInput:   zerosInput,
-		focusedInput: 0,
+		source:                 source,
+		results:                []completedFlip{},
+		loading:                false,
+		onesMsg:                "ONES",
+		zerosMsg:               "ZEROS",
+		state:                  stateNormal,
+		templateSelectionIndex: 0,
+		templateMenuItems:      []messagePair{},
+		onesInput:              onesInput,
+		zerosInput:             zerosInput,
+		focusedInput:           0,
+		randomizeMessages:      false,
 	}
 }
 
@@ -148,27 +186,75 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if m.inputMode {
-		// Handle keys in input mode
+	// Handle state-specific logic first
+	switch m.state {
+	case stateTemplateSelect:
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.Type {
+			case tea.KeyEsc:
+				m.state = stateNormal
+				m.templateMenuItems = nil // Clear ephemeral menu
+				return m, nil
+			case tea.KeyUp:
+				if m.templateSelectionIndex > 0 {
+					m.templateSelectionIndex--
+				}
+			case tea.KeyDown:
+				// We have len(messageTemplates) items + 2 special options.
+				if m.templateSelectionIndex < len(m.templateMenuItems)+1 {
+					m.templateSelectionIndex++
+				}
+			case tea.KeyEnter:
+				m.randomizeMessages = false // Reset random mode unless selected.
+				switch m.templateSelectionIndex {
+				case 0: // Custom
+					m.state = stateInput
+					m.focusedInput = 0
+
+					// Randomly pre-fill from existing templates
+					r := rand.New(rand.NewSource(time.Now().UnixNano()))
+					randIndex := r.Intn(len(messageTemplates))
+					randPair := messageTemplates[randIndex]
+					m.onesInput.SetValue(randPair.ones)
+					m.zerosInput.SetValue(randPair.zeros)
+					m.zerosInput.Blur()
+					return m, m.onesInput.Focus()
+				case 1: // Random
+					m.randomizeMessages = true
+					m.onesMsg = "Random" // This is just for display in status, not used for flips
+					m.zerosMsg = "Random"
+					m.state = stateNormal
+				default: // A template was selected
+					// The index is offset by 2 (Custom, Random)
+					pair := m.templateMenuItems[m.templateSelectionIndex-2]
+					m.onesMsg = pair.ones
+					m.zerosMsg = pair.zeros
+					m.state = stateNormal
+				}
+				m.templateMenuItems = nil // Clear ephemeral menu
+				return m, nil
+			}
+		}
+		return m, nil // Consume all messages in this state
+
+	case stateInput:
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch msg.Type {
 			case tea.KeyEnter:
-				// Save new messages and exit input mode
 				m.onesMsg = m.onesInput.Value()
 				m.zerosMsg = m.zerosInput.Value()
-				m.inputMode = false
+				m.state = stateNormal
 				m.onesInput.Blur()
 				m.zerosInput.Blur()
 				return m, nil
 			case tea.KeyEsc:
-				// Discard changes and exit input mode
-				m.inputMode = false
+				m.state = stateNormal
 				m.onesInput.Blur()
 				m.zerosInput.Blur()
 				return m, nil
 			case tea.KeyTab, tea.KeyUp, tea.KeyDown:
-				// Switch focus between inputs
 				var cmd tea.Cmd
 				if m.focusedInput == 0 {
 					m.focusedInput = 1
@@ -193,7 +279,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	// Handle keys in normal mode
+	// Handle normal mode and global messages
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -206,7 +292,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, fetchAndFlipCmd(m.source)
 			}
 		case "r":
-			m.results = []flipResult{}
+			m.results = []completedFlip{}
 			return m, nil
 		case "c":
 			// Toggle between sources
@@ -217,13 +303,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "i":
-			// Enter input mode
-			m.inputMode = true
-			m.focusedInput = 0
-			m.onesInput.SetValue(m.onesMsg)
-			m.zerosInput.SetValue(m.zerosMsg)
-			m.zerosInput.Blur()
-			return m, m.onesInput.Focus()
+			m.state = stateTemplateSelect
+
+			// Create a reordered list of templates for the menu
+			r := rand.New(rand.NewSource(time.Now().UnixNano()))
+			randIndex := r.Intn(len(messageTemplates))
+			reordered := make([]messagePair, 0, len(messageTemplates))
+			reordered = append(reordered, messageTemplates[randIndex])
+			for i, p := range messageTemplates {
+				if i != randIndex {
+					reordered = append(reordered, p)
+				}
+			}
+			m.templateMenuItems = reordered
+
+			// Pre-select the first template in the list (at menu index 2)
+			m.templateSelectionIndex = 2
+			return m, nil
 		}
 
 	case tea.WindowSizeMsg:
@@ -236,7 +332,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			return m, nil
 		}
-		m.results = append(m.results, msg.result)
+
+		onesMsg := m.onesMsg
+		zerosMsg := m.zerosMsg
+		if m.randomizeMessages {
+			r := rand.New(rand.NewSource(time.Now().UnixNano()))
+			randIndex := r.Intn(len(messageTemplates))
+			pair := messageTemplates[randIndex]
+			onesMsg = pair.ones
+			zerosMsg = pair.zeros
+		}
+
+		completed := completedFlip{
+			ones:     msg.result.ones,
+			zeros:    msg.result.zeros,
+			winner:   msg.result.winner,
+			onesMsg:  onesMsg,
+			zerosMsg: zerosMsg,
+		}
+		m.results = append(m.results, completed)
 	}
 
 	return m, nil
@@ -247,7 +361,41 @@ func (m model) View() string {
 		return "loading..."
 	}
 
-	if m.inputMode {
+	// Template Selection View
+	if m.state == stateTemplateSelect {
+		var b strings.Builder
+		b.WriteString("Select a message pair (Up/Down to navigate, Enter to select):\n\n")
+
+		// Custom
+		cursor := "  "
+		if m.templateSelectionIndex == 0 {
+			cursor = "-> "
+		}
+		b.WriteString(fmt.Sprintf("%sCustom\n", cursor))
+
+		// Random
+		cursor = "  "
+		if m.templateSelectionIndex == 1 {
+			cursor = "-> "
+		}
+		b.WriteString(fmt.Sprintf("%sRandom\n", cursor))
+
+		// Shuffled Templates
+		for i, pair := range m.templateMenuItems {
+			menuIndex := i + 2
+			cursor = "  "
+			if m.templateSelectionIndex == menuIndex {
+				cursor = "-> "
+			}
+			b.WriteString(fmt.Sprintf("%s%s / %s\n", cursor, pair.ones, pair.zeros))
+		}
+
+		b.WriteString(statusStyle.Render("\n(esc to cancel)"))
+		return lipgloss.NewStyle().Width(m.width).Align(lipgloss.Center).Render(b.String())
+	}
+
+	// Input View
+	if m.state == stateInput {
 		var b strings.Builder
 		b.WriteString("Enter new messages for winners (Tab or Up/Down to switch):\n\n")
 		b.WriteString(m.onesInput.View() + "\n")
@@ -255,6 +403,8 @@ func (m model) View() string {
 		b.WriteString(statusStyle.Render("(esc to cancel, enter to save)"))
 		return lipgloss.NewStyle().Width(m.width).Align(lipgloss.Center).Render(b.String())
 	}
+
+	// Normal View
 
 	// 1. Header
 	header := titleStyle.Render("QCOIN - Quantum Flip")
@@ -284,14 +434,14 @@ func (m model) View() string {
 
 		switch res.winner {
 		case resOnes:
-			label = m.onesMsg
+			label = res.onesMsg
 			if isLatest {
 				style = currentOneStyle
 			} else {
 				style = winOneStyle
 			}
 		case resZeros:
-			label = m.zerosMsg
+			label = res.zerosMsg
 			if isLatest {
 				style = currentZeroStyle
 			} else {
@@ -388,7 +538,7 @@ func main() {
 	if *interactive {
 		p := tea.NewProgram(initialModel(*source), tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
-			fmt.Printf("Alas, there's been an error: %v", err)
+			fmt.Printf("Alas, there's been an error: %v\n", err)
 			os.Exit(1)
 		}
 	} else {
