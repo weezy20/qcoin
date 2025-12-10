@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -100,12 +101,18 @@ type flipResult struct {
 }
 
 type model struct {
-	source  string
-	results []flipResult
-	loading bool
-	err     error
-	width   int
-	height  int
+	source       string
+	results      []flipResult
+	loading      bool
+	err          error
+	width        int
+	height       int
+	onesMsg      string
+	zerosMsg     string
+	inputMode    bool
+	onesInput    textinput.Model
+	zerosInput   textinput.Model
+	focusedInput int // 0 for ones, 1 for zeros
 }
 
 type flipMsg struct {
@@ -114,20 +121,80 @@ type flipMsg struct {
 }
 
 func initialModel(source string) model {
+	onesInput := textinput.New()
+	onesInput.Placeholder = "Message for ONES winner"
+	onesInput.Width = 30
+	onesInput.CharLimit = 20
+
+	zerosInput := textinput.New()
+	zerosInput.Placeholder = "Message for ZEROS winner"
+	zerosInput.Width = 30
+	zerosInput.CharLimit = 20
+
 	return model{
-		source:  source,
-		results: []flipResult{},
-		loading: false,
+		source:       source,
+		results:      []flipResult{},
+		loading:      false,
+		onesMsg:      "ONES",
+		zerosMsg:     "ZEROS",
+		onesInput:    onesInput,
+		zerosInput:   zerosInput,
+		focusedInput: 0,
 	}
 }
 
 func (m model) Init() tea.Cmd {
-	return nil
+	return textinput.Blink
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
+	if m.inputMode {
+		// Handle keys in input mode
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.Type {
+			case tea.KeyEnter:
+				// Save new messages and exit input mode
+				m.onesMsg = m.onesInput.Value()
+				m.zerosMsg = m.zerosInput.Value()
+				m.inputMode = false
+				m.onesInput.Blur()
+				m.zerosInput.Blur()
+				return m, nil
+			case tea.KeyEsc:
+				// Discard changes and exit input mode
+				m.inputMode = false
+				m.onesInput.Blur()
+				m.zerosInput.Blur()
+				return m, nil
+			case tea.KeyTab, tea.KeyUp, tea.KeyDown:
+				// Switch focus between inputs
+				var cmd tea.Cmd
+				if m.focusedInput == 0 {
+					m.focusedInput = 1
+					m.onesInput.Blur()
+					cmd = m.zerosInput.Focus()
+				} else {
+					m.focusedInput = 0
+					m.zerosInput.Blur()
+					cmd = m.onesInput.Focus()
+				}
+				return m, cmd
+			}
+		}
 
+		// Update the focused text input
+		var cmd tea.Cmd
+		if m.focusedInput == 0 {
+			m.onesInput, cmd = m.onesInput.Update(msg)
+		} else {
+			m.zerosInput, cmd = m.zerosInput.Update(msg)
+		}
+		return m, cmd
+	}
+
+	// Handle keys in normal mode
+	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q":
@@ -149,6 +216,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.source = "qr"
 			}
 			return m, nil
+		case "i":
+			// Enter input mode
+			m.inputMode = true
+			m.focusedInput = 0
+			m.onesInput.SetValue(m.onesMsg)
+			m.zerosInput.SetValue(m.zerosMsg)
+			m.zerosInput.Blur()
+			return m, m.onesInput.Focus()
 		}
 
 	case tea.WindowSizeMsg:
@@ -170,6 +245,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) View() string {
 	if m.width == 0 {
 		return "loading..."
+	}
+
+	if m.inputMode {
+		var b strings.Builder
+		b.WriteString("Enter new messages for winners (Tab or Up/Down to switch):\n\n")
+		b.WriteString(m.onesInput.View() + "\n")
+		b.WriteString(m.zerosInput.View() + "\n\n")
+		b.WriteString(statusStyle.Render("(esc to cancel, enter to save)"))
+		return lipgloss.NewStyle().Width(m.width).Align(lipgloss.Center).Render(b.String())
 	}
 
 	// 1. Header
@@ -200,14 +284,14 @@ func (m model) View() string {
 
 		switch res.winner {
 		case resOnes:
-			label = "ONES"
+			label = m.onesMsg
 			if isLatest {
 				style = currentOneStyle
 			} else {
 				style = winOneStyle
 			}
 		case resZeros:
-			label = "ZEROS"
+			label = m.zerosMsg
 			if isLatest {
 				style = currentZeroStyle
 			} else {
@@ -253,7 +337,7 @@ func (m model) View() string {
 		status = fmt.Sprintf("Source: %s | Total Flips: %d", strings.ToUpper(m.source), len(m.results))
 	}
 
-	help := statusStyle.Render("\nPress [Enter] to Flip • [r] to Reset • [c] to Change Source • [q] to Quit")
+	help := statusStyle.Render("\nPress [Enter] to Flip • [r] to Reset • [c] to Change Source • [i] to Change Messages • [q] to Quit")
 
 	// Layout Composition
 	return lipgloss.JoinVertical(
