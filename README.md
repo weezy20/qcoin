@@ -10,7 +10,7 @@ go install github.com/weezy20/qcoin@latest
 
 ## Run 
 
-Normal coin toss:
+Start qcoin in interactive mode:
 
 ```sh
 qcoin
@@ -24,8 +24,13 @@ qcoin -s anu # Note: this is rate limited to 1 request per minute
 qcoin -s qr
 ```
 
-Or run using TUI for multiple runs, interactive quantum source changes. 
+Spin just a coin
 
 ```sh
 qcoin -i
+```
+
+Or for `N` times with:
+```sh
+qcoin -i N
 ```

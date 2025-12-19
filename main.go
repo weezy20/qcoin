@@ -2,12 +2,12 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -147,6 +147,8 @@ type model struct {
 	zerosInput             textinput.Model
 	focusedInput           int
 	randomizeMessages      bool
+	accumulatedOnes        int
+	accumulatedZeros       int
 }
 
 type flipMsg struct {
@@ -178,6 +180,8 @@ func initialModel(source string) model {
 		zerosInput:             zerosInput,
 		focusedInput:           0,
 		randomizeMessages:      false,
+		accumulatedOnes:        0,
+		accumulatedZeros:       0,
 	}
 }
 
@@ -293,6 +297,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "r":
 			m.results = []completedFlip{}
+			m.accumulatedOnes = 0
+			m.accumulatedZeros = 0
 			return m, nil
 		case "c":
 			// Toggle between sources
@@ -332,6 +338,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			return m, nil
 		}
+
+		m.accumulatedOnes += msg.result.ones
+		m.accumulatedZeros += msg.result.zeros
 
 		onesMsg := m.onesMsg
 		zerosMsg := m.zerosMsg
@@ -484,7 +493,8 @@ func (m model) View() string {
 	} else if m.loading {
 		status = "Extracting entropy..."
 	} else {
-		status = fmt.Sprintf("Source: %s | Total Flips: %d", strings.ToUpper(m.source), len(m.results))
+		score := fmt.Sprintf("Score (1s/0s): %d/%d", m.accumulatedOnes, m.accumulatedZeros)
+		status = fmt.Sprintf("Source: %s | Total Flips: %d | %s", strings.ToUpper(m.source), len(m.results), score)
 	}
 
 	help := statusStyle.Render("\nPress [Enter] to Flip • [r] to Reset • [c] to Change Source • [i] to Change Messages • [q] to Quit")
@@ -505,7 +515,7 @@ func (m model) View() string {
 
 func fetchAndFlipCmd(source string) tea.Cmd {
 	return func() tea.Msg {
-		bytes, err := fetchRandomBytes(source)
+		bytes, err := fetchRandomBytes(source, bytesToFetch)
 		if err != nil {
 			return flipMsg{err: err}
 		}
@@ -531,26 +541,48 @@ func fetchAndFlipCmd(source string) tea.Cmd {
 // --- Main ---
 
 func main() {
-	source := flag.String("s", "qr", "Source: qr (qrandom.io) or anu (ANU QRNG)")
-	interactive := flag.Bool("i", false, "Start interactive TUI mode")
-	flag.Parse()
+	// Manual flag parsing to support -iN format
+	source := "qr"
+	runInteractive := true
+	numBytes := bytesToFetch
 
-	if *interactive {
-		p := tea.NewProgram(initialModel(*source), tea.WithAltScreen())
+	args := os.Args[1:]
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if strings.HasPrefix(arg, "-i") {
+			runInteractive = false
+			if len(arg) > 2 {
+				byteStr := arg[2:]
+				if n, err := strconv.Atoi(byteStr); err == nil {
+					numBytes = n
+				} else {
+					fmt.Fprintf(os.Stderr, "Error: invalid number of bytes for -i flag: %s\n", byteStr)
+					os.Exit(1)
+				}
+			}
+		} else if arg == "-s" {
+			if i+1 < len(args) {
+				source = args[i+1]
+				i++ // skip next arg as it's the value for -s
+			}
+		}
+	}
+
+	if runInteractive {
+		p := tea.NewProgram(initialModel(source), tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			fmt.Printf("Alas, there's been an error: %v\n", err)
 			os.Exit(1)
 		}
 	} else {
-		// Standard CLI Mode
-		runCLI(*source)
+		runCLI(source, numBytes)
 	}
 }
 
 // --- Existing Logic (Refactored slightly for reuse) ---
 
-func runCLI(source string) {
-	bytes, err := fetchRandomBytes(source)
+func runCLI(source string, numBytes int) {
+	bytes, err := fetchRandomBytes(source, numBytes)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -587,21 +619,21 @@ func countBits(bytes []byte) (int, int) {
 	return ones, zeros
 }
 
-func fetchRandomBytes(source string) ([]byte, error) {
+func fetchRandomBytes(source string, numBytes int) ([]byte, error) {
 	switch source {
 	case "qr":
-		return fetchQRandomBytes()
+		return fetchQRandomBytes(numBytes)
 	case "anu":
-		return fetchAnuQrngBytes()
+		return fetchAnuQrngBytes(numBytes)
 	default:
 		return nil, fmt.Errorf("unknown source: %s (use 'qr' or 'anu')", source)
 	}
 }
 
-func fetchQRandomBytes() ([]byte, error) {
+func fetchQRandomBytes(numBytes int) ([]byte, error) {
 	client := &http.Client{Timeout: timeout}
 
-	url := fmt.Sprintf("https://qrandom.io/api/random/binary?bytes=%d", bytesToFetch)
+	url := fmt.Sprintf("https://qrandom.io/api/random/binary?bytes=%d", numBytes)
 	resp, err := client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("qrandom.io request failed: %w", err)
@@ -635,10 +667,10 @@ func fetchQRandomBytes() ([]byte, error) {
 	return bytes, nil
 }
 
-func fetchAnuQrngBytes() ([]byte, error) {
+func fetchAnuQrngBytes(numBytes int) ([]byte, error) {
 	client := &http.Client{Timeout: timeout}
 
-	url := fmt.Sprintf("https://qrng.anu.edu.au/API/jsonI.php?length=%d&type=uint8", bytesToFetch)
+	url := fmt.Sprintf("https://qrng.anu.edu.au/API/jsonI.php?length=%d&type=uint8", numBytes)
 	resp, err := client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("ANU QRNG request failed: %w", err)
@@ -658,8 +690,8 @@ func fetchAnuQrngBytes() ([]byte, error) {
 		return nil, fmt.Errorf("ANU QRNG API returned success=false")
 	}
 
-	if len(anuResp.Data) != bytesToFetch {
-		return nil, fmt.Errorf("expected %d bytes, got %d", bytesToFetch, len(anuResp.Data))
+	if len(anuResp.Data) != numBytes {
+		return nil, fmt.Errorf("expected %d bytes, got %d", numBytes, len(anuResp.Data))
 	}
 
 	return anuResp.Data, nil
