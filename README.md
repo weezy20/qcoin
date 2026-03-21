@@ -34,3 +34,5 @@ Or for `N` times with:
 ```sh
 qcoin -i N
 ```
+
+> **Disclaimer:** Use it ONLY for silly & inconsequential stuff.
