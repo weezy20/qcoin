@@ -1,19 +1,14 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
-	"os"
-	"strconv"
-	"strings"
 	"time"
+)
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+const (
+	maxBufferDuration = 3 * time.Second
 )
 
 const (
@@ -518,6 +513,9 @@ func (m model) View() string {
 
 func fetchAndFlipCmd(source string) tea.Cmd {
 	return func() tea.Msg {
+		delay := time.Duration(rand.Int64N(int64(maxBufferDuration)))
+		time.Sleep(delay)
+
 		bytes, err := fetchRandomBytes(source, bytesToFetch)
 		if err != nil {
 			return flipMsg{err: err}
