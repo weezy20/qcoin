@@ -179,7 +179,7 @@ func initialModel(source string) model {
 		onesInput:              onesInput,
 		zerosInput:             zerosInput,
 		focusedInput:           0,
-		randomizeMessages:      false,
+		randomizeMessages:      true,
 		accumulatedOnes:        0,
 		accumulatedZeros:       0,
 	}
@@ -323,8 +323,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.templateMenuItems = reordered
 
-			// Pre-select the first template in the list (at menu index 2)
-			m.templateSelectionIndex = 2
+			// Pre-select Random (at menu index 1)
+			m.templateSelectionIndex = 1
 			return m, nil
 		}
 
