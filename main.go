@@ -499,6 +499,8 @@ func (m model) View() string {
 
 	help := statusStyle.Render("\nPress [Enter] to Flip • [r] to Reset • [c] to Change Source • [i] to Change Messages • [q] to Quit")
 
+	disclaimer := statusStyle.Render("\n⚠ Use it ONLY for silly & inconsequential stuff")
+
 	// Layout Composition
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -508,6 +510,7 @@ func (m model) View() string {
 		"\n",
 		status,
 		help,
+		disclaimer,
 	)
 }
 
