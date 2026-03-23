@@ -327,8 +327,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.templateMenuItems = reordered
 
-			// Pre-select Random (at menu index 1)
-			m.templateSelectionIndex = 1
+			// Pre-select the first shuffled template (at menu index 2)
+			m.templateSelectionIndex = 2
 			return m, nil
 		}
 
