@@ -171,19 +171,23 @@ func initialModel(source string) model {
 	zerosInput.Width = 30
 	zerosInput.CharLimit = 20
 
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	randIndex := r.Intn(len(messageTemplates))
+	randPair := messageTemplates[randIndex]
+
 	return model{
 		source:                 source,
 		results:                []completedFlip{},
 		loading:                false,
-		onesMsg:                "ONES",
-		zerosMsg:               "ZEROS",
+		onesMsg:                randPair.ones,
+		zerosMsg:               randPair.zeros,
 		state:                  stateNormal,
 		templateSelectionIndex: 0,
 		templateMenuItems:      []messagePair{},
 		onesInput:              onesInput,
 		zerosInput:             zerosInput,
 		focusedInput:           0,
-		randomizeMessages:      true,
+		randomizeMessages:      false,
 		accumulatedOnes:        0,
 		accumulatedZeros:       0,
 	}
